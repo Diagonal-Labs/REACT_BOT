@@ -5,22 +5,28 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { GlobalWorkerOptions } from 'pdfjs-dist/build/pdf';
 
 // Set up the PDF.js worker source
-GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.worker.min.js';
+// For the latest version:
+GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 const parsePDF = async (file) => {
   try {
     const pdfData = await file.arrayBuffer();
-    const pdfDoc = await pdfjsLib.getDocument({ data: pdfData }).promise;
-    let text = '';
+    const loadingTask = pdfjsLib.getDocument({ data: pdfData });
+    const pdfDoc = await loadingTask.promise;
+    
+    let fullText = '';
     for (let i = 1; i <= pdfDoc.numPages; i++) {
       const page = await pdfDoc.getPage(i);
-      const content = await page.getTextContent();
-      text += content.items.map(item => item.str).join(' ');
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items
+        .map(item => item.str)
+        .join(' ');
+      fullText += pageText + ' ';
     }
-    return text;
+    return fullText.trim();
   } catch (error) {
-    console.error('Error extracting text from PDF:', error);
-    return 'Data Engineer, AWS, Python'; // Default text if PDF parsing fails
+    console.error('Error parsing PDF:', error);
+    throw error;
   }
 };
 
@@ -28,17 +34,22 @@ const parseFileToText = async (file) => {
   try {
     if (file.type === 'application/pdf') {
       return await parsePDF(file);
-    } else {
+    } else if (file.type === 'text/plain') {
+      const text = await file.text(); // Using the File API's text() method
+      return text;
+    } else if (file.type.includes('word')) {
+      // For doc/docx files, we'll need to use FileReader
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onload = (event) => resolve(event.target.result);
-        reader.onerror = (error) => reject(error);
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = (e) => reject(e);
         reader.readAsText(file);
       });
     }
+    throw new Error('Unsupported file type');
   } catch (error) {
     console.error('Error parsing file:', error);
-    return 'Data Engineer, AWS, Python'; // Default text if any parsing fails
+    throw error;
   }
 };
 
@@ -48,26 +59,36 @@ const UploadSection = ({ onUploadComplete, setUploadData }) => {
     resume: null,
     jobDescription: null,
   });
-
+  
   const handleResumeUpload = async (acceptedFiles) => {
     try {
       const file = acceptedFiles[0];
-      const text = await parseFileToText(file); // Handle PDF, DOC, DOCX, and TXT
-      setUploadData((prev) => ({ ...prev, resumeText: text }));
-      setUploadedFiles((prev) => ({ ...prev, resume: file.name }));
+      console.log('Uploading file:', file.name, 'Type:', file.type);
+      
+      const text = await parseFileToText(file);
+      console.log('Extracted text:', text.substring(0, 100) + '...'); // Log first 100 chars
+      
+      setUploadData(prev => ({ ...prev, resumeText: text }));
+      setUploadedFiles(prev => ({ ...prev, resume: file.name }));
     } catch (error) {
-      console.error('Error uploading resume:', error);
+      console.error('Error processing resume:', error);
+      // Handle the error appropriately, maybe show a toast message
     }
   };
 
   const handleJobDescriptionUpload = async (acceptedFiles) => {
     try {
       const file = acceptedFiles[0];
+      console.log('Uploading job description:', file.name, 'Type:', file.type);
+      
       const text = await parseFileToText(file);
-      setUploadData((prev) => ({ ...prev, jobDescriptionText: text }));
-      setUploadedFiles((prev) => ({ ...prev, jobDescription: file.name }));
+      console.log('Extracted text:', text.substring(0, 100) + '...'); // Log first 100 chars
+      
+      setUploadData(prev => ({ ...prev, jobDescriptionText: text }));
+      setUploadedFiles(prev => ({ ...prev, jobDescription: file.name }));
     } catch (error) {
-      console.error('Error uploading job description:', error);
+      console.error('Error processing job description:', error);
+      // Handle the error appropriately
     }
   };
 
